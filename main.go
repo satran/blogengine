@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -26,7 +27,14 @@ func main() {
 	}
 
 	m := mux{d: articles}
-	if err := http.ListenAndServe(":8080", &m); err != nil {
+	srv := &http.Server{
+		Addr:         ":8080",
+		ReadTimeout:  time.Second,
+		WriteTimeout: 2 * time.Second,
+		Handler:      &m,
+	}
+	srv.SetKeepAlivesEnabled(false)
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
