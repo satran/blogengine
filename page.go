@@ -1,20 +1,69 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
 	"html/template"
 	"io"
+	"io/ioutil"
+	"time"
+
+	"github.com/russross/blackfriday"
 )
 
 type Page struct {
 	Path    string
 	Title   string
-	Date    string
-	Content template.HTML
+	Date    time.Time
+	Content []byte
 }
 
 // parsePage returns
-func parsePage(r io.Reader) (*Page, error) {
+func parsePage(page io.Reader) (*Page, error) {
+	p := &Page{}
+	r := bufio.NewReader(page)
+	n := 0
+	var markdown template.HTML
+	for {
+		// the first two lines are use for meta data. The first line is always the title.
+		// The second line is the date in the format dd/mm/yyyy.
+		// Also the prefix is ignored, I'm assuming I will not create really long lines
+		line, _, err := r.ReadLine()
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("read page: %w", err)
+		}
+		n++
+		if n == 1 {
+			p.Title = string(line)
+			continue
+		}
+		if n == 2 {
+			p.Date = time.Now()
+		}
+		if err == io.EOF {
+			break
+		}
 
+		content, err := ioutil.ReadAll(r)
+		if err != nil {
+			return nil, fmt.Errorf("read content: %w", err)
+		}
+		// the template.HTML allows embedding HTML in the usually escaped HTML during template execution
+		markdown = template.HTML(string(blackfriday.Run(content)))
+		break
+	}
+	wr := &bytes.Buffer{}
+	data := map[string]interface{}{
+		"Title": p.Title,
+		"Body":  markdown,
+		"Date":  p.Date,
+	}
+	if err := pageTmpl.Execute(wr, data); err != nil {
+		return nil, fmt.Errorf("template parsing: %w", err)
+	}
+	p.Content = wr.Bytes()
+	return p, nil
 }
 
 var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
@@ -72,6 +121,8 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
+<h1 class="title">{{.Title}}</h1>
+<p class="date">{{.Date}}</p1>
 {{ .Body }}
 </div>
 </body>
