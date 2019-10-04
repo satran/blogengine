@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/russross/blackfriday"
 )
@@ -38,8 +39,10 @@ func parse(dir string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("read dir: %w", err)
 	}
 	articles := make(map[string][]byte)
+	var articleList []string
 	for _, f := range files {
 		name := f.Name()
+		articleList = append(articleList, fmt.Sprintf(`<p><a href="/%s">%s</a></p>`, name, name))
 		raw, err := ioutil.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return nil, fmt.Errorf("read file: %w", err)
@@ -50,8 +53,14 @@ func parse(dir string) (map[string][]byte, error) {
 		if err := postTmpl.Execute(wr, map[string]interface{}{"Title": name, "Body": parsed}); err != nil {
 			return nil, fmt.Errorf("template parsing: %w", err)
 		}
-		articles[name] = wr.Bytes()
+		articles["/"+name] = wr.Bytes()
 	}
+	parsed := template.HTML(strings.Join(articleList, "\n"))
+	wr := &bytes.Buffer{}
+	if err := postTmpl.Execute(wr, map[string]interface{}{"Title": "Articles", "Body": parsed}); err != nil {
+		return nil, fmt.Errorf("template parsing: %w", err)
+	}
+	articles["/articles"] = wr.Bytes()
 	return articles, nil
 }
 
@@ -60,8 +69,8 @@ type mux struct {
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.URL.Path[1:])
-	a, ok := m.d[r.URL.Path[1:]]
+	log.Println(r.Method, r.URL.Path)
+	a, ok := m.d[r.URL.Path]
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		if _, err := w.Write([]byte("not found")); err != nil {
@@ -88,12 +97,13 @@ var postTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
     }
     .container {
         background: #fff;
-        max-width: 600px;
-        font-family: 'Helvetica', 'Arial', sans-serif;
-        line-height: 1.3;
-        color: #333;
+        max-width: 700px;
         margin: 0;
         padding: 1em;
+        font-family: 'Helvetica', 'Arial', sans-serif;
+        line-height: 1.4;
+        color: #333;
+        padding-bottom: 100%;
     }
     a {
         color: #333;
