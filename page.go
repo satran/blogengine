@@ -39,7 +39,10 @@ func parsePage(page io.Reader) (*Page, error) {
 			continue
 		}
 		if n == 2 {
-			p.Date = time.Now()
+			p.Date, err = time.Parse("02/01/2006", string(line))
+			if err != nil {
+				return nil, fmt.Errorf("parsing date: %w", err)
+			}
 		}
 		if err == io.EOF {
 			break
@@ -90,6 +93,16 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
         color: #333;
         padding-bottom: 100%;
     }
+    .title {
+        padding: 1em 1em 0 1em
+	margin: 0;
+    }
+    .date {
+        padding: 0 0 1em 0;
+	margin: 0;
+	font-style: italic;
+	border-bottom: 1px solid;
+    }
     a {
         color: #333;
     }
@@ -121,8 +134,8 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
-<h1 class="title">{{.Title}}</h1>
-<p class="date">{{.Date}}</p1>
+<h1 class="title">{{ .Title }}</h1>
+<p class="date">{{ .Date.Format "Jan 2 2006" }}</p1>
 {{ .Body }}
 </div>
 </body>
