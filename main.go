@@ -48,7 +48,6 @@ func parse(dir string) (map[string][]byte, error) {
 	var articleList []string
 	for _, f := range files {
 		name := f.Name()
-		articleList = append(articleList, fmt.Sprintf(`<p><a href="/%s">%s</a></p>`, name, name))
 		f, err := os.Open(filepath.Join(dir, name))
 		if err != nil {
 			return nil, fmt.Errorf("open file: %w", err)
@@ -59,6 +58,7 @@ func parse(dir string) (map[string][]byte, error) {
 			return nil, fmt.Errorf("parse page: %w", err)
 		}
 		articles["/"+name] = p.Content
+		articleList = append(articleList, fmt.Sprintf(`<p>%s <a href="/%s">%s</a></p>`, p.Date.Format("Jan 2 2006"), name, p.Title))
 	}
 	parsed := template.HTML(strings.Join(articleList, "\n"))
 	wr := &bytes.Buffer{}

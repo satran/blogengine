@@ -79,29 +79,32 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
     <link rel="shortcut icon" href="/images/favicon.png" />
     <style>
     body {
-        background: #fafafa;
+        background: #fff;
         margin: 0;
         padding: 0;
     }
     .container {
-        background: #fff;
-        max-width: 700px;
-        margin: 0;
+        max-width: 600px;
+	min-height: 100%;
+        margin: 0 auto;
         padding: 1em;
-        font-family: 'Helvetica', 'Arial', sans-serif;
-        line-height: 1.4;
+        font-family: 'Helvetica Neue', 'Arial', sans-serif;
+        line-height: 1.5;
         color: #333;
-        padding-bottom: 100%;
+	text-rendering: optimizeLegibility;
     }
     .title {
-        padding: 1em 1em 0 1em
+        padding: 0;
 	margin: 0;
+	text-align: center;
+	font-weight: normal;
     }
     .date {
         padding: 0 0 1em 0;
 	margin: 0;
 	font-style: italic;
 	border-bottom: 1px solid;
+	text-align: center;
     }
     a {
         color: #333;
@@ -111,10 +114,9 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
     }
     @media (prefers-color-scheme: dark) {
         body {
-            background: #000;
+            background: #181818;
         }
         .container {
-            background: #181818;
             color: #ddd;
         }
         a {
