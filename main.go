@@ -10,8 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/russross/blackfriday"
+	"time"
 )
 
 func main() {
@@ -28,7 +27,14 @@ func main() {
 	}
 
 	m := mux{d: articles}
-	if err := http.ListenAndServe(":8080", &m); err != nil {
+	srv := &http.Server{
+		Addr:         ":8080",
+		ReadTimeout:  time.Second,
+		WriteTimeout: 2 * time.Second,
+		Handler:      &m,
+	}
+	srv.SetKeepAlivesEnabled(false)
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -42,22 +48,21 @@ func parse(dir string) (map[string][]byte, error) {
 	var articleList []string
 	for _, f := range files {
 		name := f.Name()
-		articleList = append(articleList, fmt.Sprintf(`<p><a href="/%s">%s</a></p>`, name, name))
-		raw, err := ioutil.ReadFile(filepath.Join(dir, name))
+		f, err := os.Open(filepath.Join(dir, name))
 		if err != nil {
-			return nil, fmt.Errorf("read file: %w", err)
+			return nil, fmt.Errorf("open file: %w", err)
 		}
-		// the template.HTML allows embedding HTML in the usually escaped HTML during template execution
-		parsed := template.HTML(string(blackfriday.Run(raw)))
-		wr := &bytes.Buffer{}
-		if err := postTmpl.Execute(wr, map[string]interface{}{"Title": name, "Body": parsed}); err != nil {
-			return nil, fmt.Errorf("template parsing: %w", err)
+		defer f.Close()
+		p, err := parsePage(f)
+		if err != nil {
+			return nil, fmt.Errorf("parse page: %w", err)
 		}
-		articles["/"+name] = wr.Bytes()
+		articles["/"+name] = p.Content
+		articleList = append(articleList, fmt.Sprintf(`<p>%s <a href="/%s">%s</a></p>`, p.Date.Format("Jan 2 2006"), name, p.Title))
 	}
 	parsed := template.HTML(strings.Join(articleList, "\n"))
 	wr := &bytes.Buffer{}
-	if err := postTmpl.Execute(wr, map[string]interface{}{"Title": "Articles", "Body": parsed}); err != nil {
+	if err := pageTmpl.Execute(wr, map[string]interface{}{"Title": "Articles", "Body": parsed}); err != nil {
 		return nil, fmt.Errorf("template parsing: %w", err)
 	}
 	articles["/articles"] = wr.Bytes()
@@ -80,63 +85,3 @@ func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(a)
 }
-
-var postTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    <meta http-equiv="cache-control" content="no-cache">
-    <title>{{ .Title }}</title>
-    <link rel="shortcut icon" href="/images/favicon.png" />
-    <style>
-    body {
-        background: #fafafa;
-        margin: 0;
-        padding: 0;
-    }
-    .container {
-        background: #fff;
-        max-width: 700px;
-        margin: 0;
-        padding: 1em;
-        font-family: 'Helvetica', 'Arial', sans-serif;
-        line-height: 1.4;
-        color: #333;
-        padding-bottom: 100%;
-    }
-    a {
-        color: #333;
-    }
-    a:visited {
-        color: #777;
-    }
-    @media (prefers-color-scheme: dark) {
-        body {
-            background: #000;
-        }
-        .container {
-            background: #181818;
-            color: #ddd;
-        }
-        a {
-            color: #ddd;
-        }
-        a:visited {
-            color: #aaa;
-        }
-
-    }
-    @media print{
-		body{
-			max-width:none
-		}
-    }
-    </style>
-</head>
-<body>
-<div class="container">
-{{ .Body }}
-</div>
-</body>
-`))
