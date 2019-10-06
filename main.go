@@ -56,11 +56,31 @@ func run(c config) error {
 	if c.UseTLS {
 		srv.Addr = ":443"
 		err = srv.ListenAndServeTLS(c.Cert, c.Key)
+		go http.ListenAndServe(":80", http.HandlerFunc(redirect))
 	} else {
 		srv.Addr = ":80"
 		err = srv.ListenAndServe()
 	}
 	return err
+}
+
+func index(w http.ResponseWriter, req *http.Request) {
+	// all calls to unknown url paths should return 404
+	if req.URL.Path != "/" {
+		log.Printf("404: %s", req.URL.String())
+		http.NotFound(w, req)
+		return
+	}
+	http.ServeFile(w, req, "index.html")
+}
+
+func redirect(w http.ResponseWriter, req *http.Request) {
+	target := "https://" + req.Host + req.URL.Path
+	if len(req.URL.RawQuery) > 0 {
+		target += "?" + req.URL.RawQuery
+	}
+	log.Printf("redirect to: %s", target)
+	http.Redirect(w, req, target, http.StatusTemporaryRedirect)
 }
 
 func parse(dir string) (map[string][]byte, error) {
