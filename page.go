@@ -3,10 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/russross/blackfriday"
@@ -19,15 +23,34 @@ type Page struct {
 	Content []byte
 }
 
+var findDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}`).FindAllString
+
 // parsePage returns
-func parsePage(page io.Reader) (*Page, error) {
-	p := &Page{}
+func parsePage(name string, page io.Reader) (*Page, error) {
+	name = filepath.Base(name)
+	// Date is assumed to be the first part of the name in format dd/mm/yyyy.
+	dates := findDate(name, 1)
+	if len(dates) == 0 {
+		return nil, errors.New("couldn't find date in file name; file name should be of the format yyyy-mm-dd-name_of_file")
+	}
+	// We convert the date into yyyy/mm/dd as this is how jekyll formatted
+	// the page path. Also note that we can't have filenames with / and that's
+	// why the - is used.
+	dateStr := strings.Replace(dates[0], "-", "/", -1)
+	nameWithoutDate := strings.TrimPrefix(name, dates[0]+"-")
+	date, err := time.Parse("2006/01/02", dateStr)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse date: %w", err)
+	}
+	p := &Page{
+		Path: "/" + dateStr + "/" + nameWithoutDate,
+		Date: date,
+	}
 	r := bufio.NewReader(page)
 	n := 0
 	var markdown template.HTML
 	for {
 		// the first two lines are use for meta data. The first line is always the title.
-		// The second line is the date in the format dd/mm/yyyy.
 		// Also the prefix is ignored, I'm assuming I will not create really long lines
 		line, _, err := r.ReadLine()
 		if err != nil && err != io.EOF {
@@ -37,12 +60,6 @@ func parsePage(page io.Reader) (*Page, error) {
 		if n == 1 {
 			p.Title = string(line)
 			continue
-		}
-		if n == 2 {
-			p.Date, err = time.Parse("02/01/2006", string(line))
-			if err != nil {
-				return nil, fmt.Errorf("parsing date: %w", err)
-			}
 		}
 		if err == io.EOF {
 			break
@@ -92,6 +109,9 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
         line-height: 1.5;
         color: #333;
 	text-rendering: optimizeLegibility;
+    }
+    .container img {
+    	max-width: 100%;
     }
     .title {
         padding: 0;

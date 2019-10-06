@@ -14,18 +14,13 @@ import (
 )
 
 func main() {
-	cert := os.Getenv("CERT")
-	key := os.Getenv("KEY")
-	dir := os.Getenv("DIR")
-	if dir == "" {
-		dir = "posts"
-	}
 	c := config{
-		Cert: cert,
-		Key:  key,
-		Dir:  dir,
+		Cert:      os.Getenv("CERT"),
+		Key:       os.Getenv("KEY"),
+		PagesDir:  os.Getenv("PAGES"),
+		ImagesDir: os.Getenv("IMAGES"),
 	}
-	if cert == "" && key == "" {
+	if c.Cert == "" && c.Key == "" {
 		c.UseTLS = false
 	}
 	if err := run(c); err != nil {
@@ -34,19 +29,23 @@ func main() {
 }
 
 type config struct {
-	Cert   string
-	Key    string
-	Dir    string
-	UseTLS bool
+	Cert      string
+	Key       string
+	PagesDir  string
+	ImagesDir string
+	UseTLS    bool
 }
 
 func run(c config) error {
-	articles, err := parse(c.Dir)
+	articles, err := parse(c.PagesDir)
 	if err != nil {
 		return fmt.Errorf("parse articles: %w", err)
 	}
 
-	m := mux{d: articles}
+	m := mux{
+		d:      articles,
+		images: http.StripPrefix("/images/", http.FileServer(FileSystem{http.Dir(c.ImagesDir)})),
+	}
 	srv := &http.Server{
 		ReadTimeout:  time.Second,
 		WriteTimeout: 2 * time.Second,
@@ -77,12 +76,13 @@ func parse(dir string) (map[string][]byte, error) {
 			return nil, fmt.Errorf("open file: %w", err)
 		}
 		defer f.Close()
-		p, err := parsePage(f)
+		p, err := parsePage(f.Name(), f)
 		if err != nil {
-			return nil, fmt.Errorf("parse page: %w", err)
+			return nil, fmt.Errorf("parse page %s: %w", f.Name(), err)
 		}
-		articles["/"+name] = p.Content
-		articleList = append(articleList, fmt.Sprintf(`<p>%s <a href="/%s">%s</a></p>`, p.Date.Format("Jan 2 2006"), name, p.Title))
+		println(p.Path)
+		articles[p.Path] = p.Content
+		articleList = append(articleList, fmt.Sprintf(`<p>%s <a href="%s">%s</a></p>`, p.Date.Format("Jan 2 2006"), p.Path, p.Title))
 	}
 	parsed := template.HTML(strings.Join(articleList, "\n"))
 	wr := &bytes.Buffer{}
@@ -94,11 +94,17 @@ func parse(dir string) (map[string][]byte, error) {
 }
 
 type mux struct {
-	d map[string][]byte
+	images http.Handler
+	d      map[string][]byte
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.URL.Path)
+	if len(r.URL.Path) > len("/images") &&
+		r.URL.Path[:len("/images")] == "/images" {
+		m.images.ServeHTTP(w, r)
+		return
+	}
 	a, ok := m.d[r.URL.Path]
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
@@ -108,4 +114,27 @@ func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(a)
+}
+
+// FileSystem custom file system handler
+type FileSystem struct {
+	fs http.FileSystem
+}
+
+// Open opens file
+func (fs FileSystem) Open(path string) (http.File, error) {
+	f, err := fs.fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	s, err := f.Stat()
+	if s.IsDir() {
+		index := strings.TrimSuffix(path, "/") + "/index.html"
+		if _, err := fs.fs.Open(index); err != nil {
+			return nil, err
+		}
+	}
+
+	return f, nil
 }
