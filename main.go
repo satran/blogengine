@@ -14,29 +14,53 @@ import (
 )
 
 func main() {
+	cert := os.Getenv("CERT")
+	key := os.Getenv("KEY")
 	dir := os.Getenv("DIR")
 	if dir == "" {
 		dir = "posts"
 	}
-	articles, err := parse(dir)
-	if err != nil {
+	c := config{
+		Cert: cert,
+		Key:  key,
+		Dir:  dir,
+	}
+	if cert == "" && key == "" {
+		c.UseTLS = false
+	}
+	if err := run(c); err != nil {
 		log.Fatal(err)
 	}
-	for n := range articles {
-		log.Println(n)
+}
+
+type config struct {
+	Cert   string
+	Key    string
+	Dir    string
+	UseTLS bool
+}
+
+func run(c config) error {
+	articles, err := parse(c.Dir)
+	if err != nil {
+		return fmt.Errorf("parse articles: %w", err)
 	}
 
 	m := mux{d: articles}
 	srv := &http.Server{
-		Addr:         ":8080",
 		ReadTimeout:  time.Second,
 		WriteTimeout: 2 * time.Second,
 		Handler:      &m,
 	}
 	srv.SetKeepAlivesEnabled(false)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	if c.UseTLS {
+		srv.Addr = ":443"
+		err = srv.ListenAndServeTLS(c.Cert, c.Key)
+	} else {
+		srv.Addr = ":80"
+		err = srv.ListenAndServe()
 	}
+	return err
 }
 
 func parse(dir string) (map[string][]byte, error) {
