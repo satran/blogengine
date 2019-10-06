@@ -68,7 +68,7 @@ func parse(dir string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("read dir: %w", err)
 	}
 	articles := make(map[string][]byte)
-	var articleList []string
+	var index []*Page
 	for _, f := range files {
 		name := f.Name()
 		f, err := os.Open(filepath.Join(dir, name))
@@ -80,17 +80,101 @@ func parse(dir string) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse page %s: %w", f.Name(), err)
 		}
-		println(p.Path)
 		articles[p.Path] = p.Content
-		articleList = append(articleList, fmt.Sprintf(`<p>%s <a href="%s">%s</a></p>`, p.Date.Format("Jan 2 2006"), p.Path, p.Title))
+		index = append(index, p)
 	}
-	parsed := template.HTML(strings.Join(articleList, "\n"))
+	articles["/"], err = renderIndex(index)
+	if err != nil {
+		return nil, fmt.Errorf("render index: %w", err)
+	}
+	return articles, nil
+}
+
+var indexTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta http-equiv="cache-control" content="no-cache">
+    <title>Satyajit Ranjeev</title>
+    <link rel="shortcut icon" href="/images/favicon.png" />
+    <style>
+    body {
+        background: #fff;
+        margin: 0;
+        padding: 0;
+    }
+    .container {
+        max-width: 600px;
+	min-height: 100%;
+        margin: 0 auto;
+        padding: 1em;
+        font-family: 'Helvetica Neue', 'Arial', sans-serif;
+        line-height: 1.5;
+        color: #333;
+	text-rendering: optimizeLegibility;
+    }
+    .container img {
+    	max-width: 100%;
+    }
+    .title {
+        padding: 0;
+	margin: 0;
+	text-align: center;
+	font-weight: normal;
+    }
+    span.date {
+	font-style: italic;
+    }
+    a {
+        color: #333;
+    }
+    a:visited {
+        color: #333;
+    }
+    @media (prefers-color-scheme: dark) {
+        body {
+            background: #181818;
+        }
+        .container {
+            color: #ddd;
+        }
+        a {
+            color: #ddd;
+        }
+        a:visited {
+            color: #aaa;
+        }
+
+    }
+    @media print{
+		body{
+			max-width:none
+		}
+    }
+    </style>
+</head>
+<body>
+<div class="container">
+<p> Hi! I am Satyajit Ranjeev. I am a computer programmer who loves to solve problems. I currently work at <a href="https://solarisbank.de">solarisBank</a> as an engineer.</p>
+<p class="date"></p1>
+<h3>Articles</h3>
+{{ range . }}
+<p>
+    <a href="{{.Path}}">{{.Title}}</a>
+    <span class="date"> - {{ .Date.Format "2, Jan 2006" }}</span>
+</p>
+{{ end }}
+</div>
+</body>
+`))
+
+func renderIndex(articles []*Page) ([]byte, error) {
 	wr := &bytes.Buffer{}
-	if err := pageTmpl.Execute(wr, map[string]interface{}{"Title": "Articles", "Body": parsed}); err != nil {
+	if err := indexTmpl.Execute(wr, articles); err != nil {
 		return nil, fmt.Errorf("template parsing: %w", err)
 	}
-	articles["/articles"] = wr.Bytes()
-	return articles, nil
+	return wr.Bytes(), nil
 }
 
 type mux struct {
