@@ -19,6 +19,7 @@ func main() {
 		Key:       os.Getenv("KEY"),
 		PagesDir:  os.Getenv("PAGES"),
 		ImagesDir: os.Getenv("IMAGES"),
+		UseTLS:    true,
 	}
 	if c.Cert == "" && c.Key == "" {
 		c.UseTLS = false
