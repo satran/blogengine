@@ -125,6 +125,7 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
 	font-style: italic;
 	border-bottom: 1px solid;
 	text-align: center;
+	font-size: .8em;
     }
     a {
         color: #333;
@@ -157,7 +158,7 @@ var pageTmpl = template.Must(template.New("foo").Parse(`<!DOCTYPE html>
 <body>
 <div class="container">
 <h1 class="title">{{ .Title }}</h1>
-<p class="date">{{ .Date.Format "Jan 2 2006" }}</p1>
+<p class="date">- {{ .Date.Format "Jan 2 2006" }} -</p1>
 {{ .Body }}
 </div>
 </body>
