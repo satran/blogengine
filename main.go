@@ -19,6 +19,7 @@ func main() {
 		Key:       os.Getenv("KEY"),
 		PagesDir:  os.Getenv("PAGES"),
 		ImagesDir: os.Getenv("IMAGES"),
+		FeedFile:  os.Getenv("FEED"),
 		UseTLS:    true,
 	}
 	if c.Cert == "" && c.Key == "" {
@@ -34,6 +35,7 @@ type config struct {
 	Key       string
 	PagesDir  string
 	ImagesDir string
+	FeedFile  string
 	UseTLS    bool
 }
 
@@ -44,8 +46,9 @@ func run(c config) error {
 	}
 
 	m := mux{
-		d:      articles,
-		images: http.StripPrefix("/images/", http.FileServer(FileSystem{http.Dir(c.ImagesDir)})),
+		feedFile: c.FeedFile,
+		d:        articles,
+		images:   http.StripPrefix("/images/", http.FileServer(FileSystem{http.Dir(c.ImagesDir)})),
 	}
 	srv := &http.Server{
 		ReadTimeout:  time.Second,
@@ -199,12 +202,17 @@ func renderIndex(articles []*Page) ([]byte, error) {
 }
 
 type mux struct {
-	images http.Handler
-	d      map[string][]byte
+	feedFile string
+	images   http.Handler
+	d        map[string][]byte
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.URL.Path)
+	if r.URL.Path == "/feed.xml" {
+		http.ServeFile(w, r, m.feedFile)
+		return
+	}
 	if len(r.URL.Path) > len("/images") &&
 		r.URL.Path[:len("/images")] == "/images" {
 		m.images.ServeHTTP(w, r)
