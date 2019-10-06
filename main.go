@@ -18,8 +18,7 @@ func main() {
 		Cert:      os.Getenv("CERT"),
 		Key:       os.Getenv("KEY"),
 		PagesDir:  os.Getenv("PAGES"),
-		ImagesDir: os.Getenv("IMAGES"),
-		FeedFile:  os.Getenv("FEED"),
+		StaticDir: os.Getenv("STATIC"),
 		UseTLS:    true,
 	}
 	if c.Cert == "" && c.Key == "" {
@@ -34,8 +33,7 @@ type config struct {
 	Cert      string
 	Key       string
 	PagesDir  string
-	ImagesDir string
-	FeedFile  string
+	StaticDir string
 	UseTLS    bool
 }
 
@@ -46,9 +44,8 @@ func run(c config) error {
 	}
 
 	m := mux{
-		feedFile: c.FeedFile,
-		d:        articles,
-		images:   http.StripPrefix("/images/", http.FileServer(FileSystem{http.Dir(c.ImagesDir)})),
+		d:      articles,
+		static: http.FileServer(FileSystem{http.Dir(c.StaticDir)}),
 	}
 	srv := &http.Server{
 		ReadTimeout:  time.Second,
@@ -202,31 +199,19 @@ func renderIndex(articles []*Page) ([]byte, error) {
 }
 
 type mux struct {
-	feedFile string
-	images   http.Handler
-	d        map[string][]byte
+	static http.Handler
+	d      map[string][]byte
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.URL.Path)
-	if r.URL.Path == "/feed.xml" {
-		http.ServeFile(w, r, m.feedFile)
-		return
-	}
-	if len(r.URL.Path) > len("/images") &&
-		r.URL.Path[:len("/images")] == "/images" {
-		m.images.ServeHTTP(w, r)
-		return
-	}
 	a, ok := m.d[r.URL.Path]
-	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		if _, err := w.Write([]byte("not found")); err != nil {
-			log.Println(err)
-		}
+	if ok {
+		w.Write(a)
 		return
 	}
-	w.Write(a)
+	m.static.ServeHTTP(w, r)
+	return
 }
 
 // FileSystem custom file system handler
