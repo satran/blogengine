@@ -28,6 +28,8 @@ var findDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}`).FindAllString
 // parsePage returns
 func parsePage(name string, page io.Reader) (*Page, error) {
 	name = filepath.Base(name)
+	// Jekyll served .html
+	name = strings.Replace(name, ".md", ".html", -1)
 	// Date is assumed to be the first part of the name in format dd/mm/yyyy.
 	dates := findDate(name, 1)
 	if len(dates) == 0 {
