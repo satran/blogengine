@@ -55,8 +55,8 @@ func run(c config) error {
 	srv.SetKeepAlivesEnabled(false)
 	if c.UseTLS {
 		srv.Addr = ":443"
-		err = srv.ListenAndServeTLS(c.Cert, c.Key)
 		go http.ListenAndServe(":80", http.HandlerFunc(redirect))
+		err = srv.ListenAndServeTLS(c.Cert, c.Key)
 	} else {
 		srv.Addr = ":80"
 		err = srv.ListenAndServe()
