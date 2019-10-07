@@ -21,6 +21,12 @@ type Page struct {
 	Content []byte
 }
 
+type Pages []*Page
+
+func (p Pages) Len() int           { return len(p) }
+func (p Pages) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func (p Pages) Less(i, j int) bool { return p[i].Date.Before(p[j].Date) }
+
 func parsePage(name string, page io.Reader) (*Page, error) {
 	name = strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
 	p := &Page{

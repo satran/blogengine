@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -138,6 +139,8 @@ func parse(dir string) (map[string][]byte, error) {
 var indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
 
 func renderIndex(articles []*Page) ([]byte, error) {
+	// sort the articles by the lastest at the top
+	sort.Sort(sort.Reverse(Pages(articles)))
 	wr := &bytes.Buffer{}
 	if err := indexTmpl.Execute(wr, articles); err != nil {
 		return nil, fmt.Errorf("template parsing: %w", err)
