@@ -3,13 +3,11 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -23,30 +21,10 @@ type Page struct {
 	Content []byte
 }
 
-var findDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}`).FindAllString
-
-// parsePage returns
 func parsePage(name string, page io.Reader) (*Page, error) {
-	name = filepath.Base(name)
-	// Jekyll served .html
-	name = strings.Replace(name, ".md", ".html", -1)
-	// Date is assumed to be the first part of the name in format dd/mm/yyyy.
-	dates := findDate(name, 1)
-	if len(dates) == 0 {
-		return nil, errors.New("couldn't find date in file name; file name should be of the format yyyy-mm-dd-name_of_file")
-	}
-	// We convert the date into yyyy/mm/dd as this is how jekyll formatted
-	// the page path. Also note that we can't have filenames with / and that's
-	// why the - is used.
-	dateStr := strings.Replace(dates[0], "-", "/", -1)
-	nameWithoutDate := strings.TrimPrefix(name, dates[0]+"-")
-	date, err := time.Parse("2006/01/02", dateStr)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't parse date: %w", err)
-	}
+	name = strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
 	p := &Page{
-		Path: "/" + dateStr + "/" + nameWithoutDate,
-		Date: date,
+		Path: "/b/" + name,
 	}
 	r := bufio.NewReader(page)
 	n := 0
@@ -62,6 +40,12 @@ func parsePage(name string, page io.Reader) (*Page, error) {
 		if n == 1 {
 			p.Title = string(line)
 			continue
+		}
+		if n == 2 {
+			p.Date, err = time.Parse("02/01/2006", string(line))
+			if err != nil {
+				return nil, fmt.Errorf("couldn't parse date: %w", err)
+			}
 		}
 		if err == io.EOF {
 			break

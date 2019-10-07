@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -20,6 +21,7 @@ func main() {
 		Key:       os.Getenv("KEY"),
 		PagesDir:  os.Getenv("PAGES"),
 		StaticDir: os.Getenv("STATIC"),
+		AliasFile: os.Getenv("ALIAS"),
 		UseTLS:    true,
 	}
 	if c.Host == "" {
@@ -39,6 +41,7 @@ type config struct {
 	Key       string
 	PagesDir  string
 	StaticDir string
+	AliasFile string
 	UseTLS    bool
 }
 
@@ -47,10 +50,15 @@ func run(c config) error {
 	if err != nil {
 		return fmt.Errorf("parse articles: %w", err)
 	}
+	aliases, err := getAliases(c.AliasFile)
+	if err != nil {
+		return fmt.Errorf("load aliases: %w", err)
+	}
 
 	m := mux{
 		host:   c.Host,
 		d:      articles,
+		alias:  aliases,
 		static: http.FileServer(FileSystem{http.Dir(c.StaticDir)}),
 	}
 	srv := &http.Server{
@@ -68,6 +76,20 @@ func run(c config) error {
 		err = srv.ListenAndServe()
 	}
 	return err
+}
+
+func getAliases(filename string) (map[string]string, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("opening alias file %q %w", filename, err)
+	}
+	defer f.Close()
+
+	var aliases map[string]string
+	if err := json.NewDecoder(f).Decode(&aliases); err != nil {
+		return nil, fmt.Errorf("alias json decoding: %w", err)
+	}
+	return aliases, nil
 }
 
 func redirect(host string) http.HandlerFunc {
@@ -125,17 +147,28 @@ func renderIndex(articles []*Page) ([]byte, error) {
 
 type mux struct {
 	static http.Handler
+	alias  map[string]string
 	d      map[string][]byte
 	host   string
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.URL.Path)
+	path := r.URL.Path
+	log.Println(r.Method, path)
 	if r.Host != m.host {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	a, ok := m.d[r.URL.Path]
+	alias, ok := m.alias[path]
+	if ok {
+		if len(r.URL.RawQuery) > 0 {
+			alias += "?" + r.URL.RawQuery
+		}
+		log.Printf("redirect to: %s", alias)
+		http.Redirect(w, r, alias, http.StatusTemporaryRedirect)
+		return
+	}
+	a, ok := m.d[path]
 	if ok {
 		w.Write(a)
 		return
