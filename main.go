@@ -15,7 +15,7 @@ import (
 
 func main() {
 	c := config{
-		Host:      os.Getenv("HOST"),
+		Host:      os.Getenv("HOSTNAME"),
 		Cert:      os.Getenv("CERT"),
 		Key:       os.Getenv("KEY"),
 		PagesDir:  os.Getenv("PAGES"),
