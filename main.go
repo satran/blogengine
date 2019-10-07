@@ -15,11 +15,15 @@ import (
 
 func main() {
 	c := config{
+		Host:      os.Getenv("HOST"),
 		Cert:      os.Getenv("CERT"),
 		Key:       os.Getenv("KEY"),
 		PagesDir:  os.Getenv("PAGES"),
 		StaticDir: os.Getenv("STATIC"),
 		UseTLS:    true,
+	}
+	if c.Host == "" {
+		c.Host = "localhost"
 	}
 	if c.Cert == "" && c.Key == "" {
 		c.UseTLS = false
@@ -30,6 +34,7 @@ func main() {
 }
 
 type config struct {
+	Host      string
 	Cert      string
 	Key       string
 	PagesDir  string
@@ -44,6 +49,7 @@ func run(c config) error {
 	}
 
 	m := mux{
+		host:   c.Host,
 		d:      articles,
 		static: http.FileServer(FileSystem{http.Dir(c.StaticDir)}),
 	}
@@ -55,7 +61,7 @@ func run(c config) error {
 	srv.SetKeepAlivesEnabled(false)
 	if c.UseTLS {
 		srv.Addr = ":443"
-		go http.ListenAndServe(":80", http.HandlerFunc(redirect))
+		go http.ListenAndServe(":80", http.HandlerFunc(redirect(c.Host)))
 		err = srv.ListenAndServeTLS(c.Cert, c.Key)
 	} else {
 		srv.Addr = ":80"
@@ -64,23 +70,19 @@ func run(c config) error {
 	return err
 }
 
-func index(w http.ResponseWriter, req *http.Request) {
-	// all calls to unknown url paths should return 404
-	if req.URL.Path != "/" {
-		log.Printf("404: %s", req.URL.String())
-		http.NotFound(w, req)
-		return
+func redirect(host string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != host {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		target := "https://" + r.Host + r.URL.Path
+		if len(r.URL.RawQuery) > 0 {
+			target += "?" + r.URL.RawQuery
+		}
+		log.Printf("redirect to: %s", target)
+		http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 	}
-	http.ServeFile(w, req, "index.html")
-}
-
-func redirect(w http.ResponseWriter, req *http.Request) {
-	target := "https://" + req.Host + req.URL.Path
-	if len(req.URL.RawQuery) > 0 {
-		target += "?" + req.URL.RawQuery
-	}
-	log.Printf("redirect to: %s", target)
-	http.Redirect(w, req, target, http.StatusTemporaryRedirect)
 }
 
 func parse(dir string) (map[string][]byte, error) {
@@ -201,10 +203,15 @@ func renderIndex(articles []*Page) ([]byte, error) {
 type mux struct {
 	static http.Handler
 	d      map[string][]byte
+	host   string
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.URL.Path)
+	if r.Host != m.host {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	a, ok := m.d[r.URL.Path]
 	if ok {
 		w.Write(a)
