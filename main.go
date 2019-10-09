@@ -13,17 +13,23 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
 	c := config{
-		Host:      os.Getenv("HOSTNAME"),
-		Cert:      os.Getenv("CERT"),
-		Key:       os.Getenv("KEY"),
-		PagesDir:  os.Getenv("PAGES"),
-		StaticDir: os.Getenv("STATIC"),
-		AliasFile: os.Getenv("ALIAS"),
-		UseTLS:    true,
+		Host:         os.Getenv("HOSTNAME"),
+		Cert:         os.Getenv("CERT"),
+		Key:          os.Getenv("KEY"),
+		PagesDir:     os.Getenv("PAGES"),
+		StaticDir:    os.Getenv("STATIC"),
+		AliasFile:    os.Getenv("ALIAS"),
+		MetricsToken: os.Getenv("METRICS_TOKEN"),
+		UseTLS:       true,
+	}
+	if c.MetricsToken == "" {
+		log.Fatal("can't run without metrics token")
 	}
 	if c.Host == "" {
 		c.Host = "localhost"
@@ -37,13 +43,14 @@ func main() {
 }
 
 type config struct {
-	Host      string
-	Cert      string
-	Key       string
-	PagesDir  string
-	StaticDir string
-	AliasFile string
-	UseTLS    bool
+	Host         string
+	Cert         string
+	Key          string
+	PagesDir     string
+	StaticDir    string
+	AliasFile    string
+	MetricsToken string
+	UseTLS       bool
 }
 
 func run(c config) error {
@@ -57,10 +64,12 @@ func run(c config) error {
 	}
 
 	m := mux{
-		host:   c.Host,
-		d:      articles,
-		alias:  aliases,
-		static: http.FileServer(FileSystem{http.Dir(c.StaticDir)}),
+		host:        c.Host,
+		d:           articles,
+		alias:       aliases,
+		static:      http.FileServer(FileSystem{http.Dir(c.StaticDir)}),
+		metrics:     promhttp.Handler(),
+		bearerToken: c.MetricsToken,
 	}
 	srv := &http.Server{
 		ReadTimeout:  time.Second,
@@ -73,7 +82,7 @@ func run(c config) error {
 		go http.ListenAndServe(":80", http.HandlerFunc(redirect(c.Host)))
 		err = srv.ListenAndServeTLS(c.Cert, c.Key)
 	} else {
-		srv.Addr = ":80"
+		srv.Addr = ":8080"
 		err = srv.ListenAndServe()
 	}
 	return err
@@ -149,15 +158,28 @@ func renderIndex(articles []*Page) ([]byte, error) {
 }
 
 type mux struct {
-	static http.Handler
-	alias  map[string]string
-	d      map[string][]byte
-	host   string
+	static      http.Handler
+	metrics     http.Handler
+	bearerToken string
+	alias       map[string]string
+	d           map[string][]byte
+	host        string
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	log.Println(r.Method, path)
+	if path == "/metrics" {
+		reqToken := r.Header.Get("Authorization")
+		splitToken := strings.Split(reqToken, " ")
+		if len(splitToken) == 2 && splitToken[1] == m.bearerToken {
+			m.metrics.ServeHTTP(w, r)
+			return
+		}
+		log.Printf("unknown token: %q, %q", splitToken[1], m.bearerToken)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	if r.Host != m.host {
 		w.WriteHeader(http.StatusNotFound)
 		return
