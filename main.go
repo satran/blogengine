@@ -32,7 +32,7 @@ func main() {
 		log.Fatal("can't run without metrics token")
 	}
 	if c.Host == "" {
-		c.Host = "localhost"
+		c.Host = "localhost:8080"
 	}
 	if c.Cert == "" && c.Key == "" {
 		c.UseTLS = false
@@ -167,21 +167,21 @@ type mux struct {
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Host != m.host {
+		log.Println("unknown host: ", r.Host)
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	path := r.URL.Path
 	log.Println(r.Method, path)
 	if path == "/metrics" {
-		reqToken := r.Header.Get("Authorization")
-		splitToken := strings.Split(reqToken, " ")
-		if len(splitToken) == 2 && splitToken[1] == m.bearerToken {
+		chunks := strings.Split(r.Header.Get("Authorization"), " ")
+		if len(chunks) == 2 && chunks[1] == m.bearerToken {
 			m.metrics.ServeHTTP(w, r)
 			return
 		}
-		log.Printf("unknown token: %q, %q", splitToken[1], m.bearerToken)
+		log.Printf("unknown token: %q", chunks[1])
 		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	if r.Host != m.host {
-		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	alias, ok := m.alias[path]
