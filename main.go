@@ -11,10 +11,28 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var (
+	requestDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "Time spent in the service",
+		Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 25, 50, 100, 250},
+	})
+
+	totalRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests",
+			Help: "HTTP Requests",
+		},
+		[]string{"code", "method"},
+	)
 )
 
 func main() {
@@ -62,6 +80,7 @@ func run(c config) error {
 	if err != nil {
 		return fmt.Errorf("load aliases: %w", err)
 	}
+	prometheus.DefaultRegisterer.MustRegister(requestDuration, totalRequests)
 
 	m := mux{
 		host:        c.Host,
@@ -166,39 +185,63 @@ type mux struct {
 	host        string
 }
 
-func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Host != m.host {
-		log.Println("unknown host: ", r.Host)
-		w.WriteHeader(http.StatusNotFound)
-		return
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (r *responseWriter) WriteHeader(statusCode int) {
+	r.ResponseWriter.WriteHeader(statusCode)
+	r.statusCode = statusCode
+}
+
+func (r *responseWriter) StatusCode() int {
+	if r.statusCode == 0 {
+		return http.StatusOK
 	}
+	return r.statusCode
+}
+
+func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	path := r.URL.Path
-	log.Println(r.Method, path)
+	wr := &responseWriter{ResponseWriter: w}
+	defer func() {
+		statusCode := strconv.Itoa(wr.StatusCode())
+		requestDuration.Observe(time.Since(start).Seconds())
+		totalRequests.WithLabelValues(statusCode, strings.ToUpper(r.Method)).Inc()
+	}()
 	if path == "/metrics" {
 		chunks := strings.Split(r.Header.Get("Authorization"), " ")
 		if len(chunks) == 2 && chunks[1] == m.bearerToken {
-			m.metrics.ServeHTTP(w, r)
+			m.metrics.ServeHTTP(wr, r)
 			return
 		}
 		log.Printf("unknown token: %q", chunks[1])
-		w.WriteHeader(http.StatusUnauthorized)
+		wr.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+	if r.Host != m.host {
+		log.Println("unknown host: ", r.Host)
+		wr.WriteHeader(http.StatusNotFound)
+		return
+	}
+	log.Println(r.Method, path)
 	alias, ok := m.alias[path]
 	if ok {
 		if len(r.URL.RawQuery) > 0 {
 			alias += "?" + r.URL.RawQuery
 		}
 		log.Printf("redirect to: %s", alias)
-		http.Redirect(w, r, alias, http.StatusTemporaryRedirect)
+		http.Redirect(wr, r, alias, http.StatusTemporaryRedirect)
 		return
 	}
 	a, ok := m.d[path]
 	if ok {
-		w.Write(a)
+		wr.Write(a)
 		return
 	}
-	m.static.ServeHTTP(w, r)
+	m.static.ServeHTTP(wr, r)
 	return
 }
 
