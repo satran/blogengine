@@ -79,7 +79,7 @@ func run(c config) error {
 		host:        c.Host,
 		d:           articles,
 		alias:       aliases,
-		static:      http.FileServer(FileSystem{http.Dir(c.StaticDir)}),
+		static:      http.FileServer(newFileSystem(c.StaticDir)),
 		metrics:     promhttp.Handler(),
 		bearerToken: c.MetricsToken,
 	}

@@ -22,9 +22,11 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	wr := &ResponseWriter{ResponseWriter: w}
 	defer func() {
+		since := time.Since(start)
 		statusCode := strconv.Itoa(wr.StatusCode())
-		requestDuration.Observe(time.Since(start).Seconds())
+		requestDuration.Observe(since.Seconds())
 		totalRequests.WithLabelValues(statusCode, strings.ToUpper(r.Method), path).Inc()
+		log.Println(since, r.Method, path)
 	}()
 	if path == "/metrics" {
 		chunks := strings.Split(r.Header.Get("Authorization"), " ")
@@ -43,7 +45,6 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println(r.Method, path)
 	a, ok := m.d[path]
 	if ok {
 		wr.Write(a)
