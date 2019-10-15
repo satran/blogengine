@@ -7,25 +7,56 @@ import (
 	"html/template"
 	"io"
 	"io/ioutil"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/russross/blackfriday"
 )
 
-type Page struct {
-	Path    string
-	Title   string
-	Date    time.Time
-	Content []byte
+func parse(dir string) (map[string][]byte, error) {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read dir: %w", err)
+	}
+	articles := make(map[string][]byte)
+	var index []*Page
+	for _, f := range files {
+		name := f.Name()
+		f, err := os.Open(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("open file: %w", err)
+		}
+		defer f.Close()
+		p, err := parsePage(f.Name(), f)
+		if err != nil {
+			return nil, fmt.Errorf("parse page %s: %w", f.Name(), err)
+		}
+		articles[p.Path] = p.Content
+		index = append(index, p)
+	}
+	articles["/"], err = renderIndex(index)
+	if err != nil {
+		return nil, fmt.Errorf("render index: %w", err)
+	}
+	return articles, nil
 }
 
-type Pages []*Page
+var indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
 
-func (p Pages) Len() int           { return len(p) }
-func (p Pages) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
-func (p Pages) Less(i, j int) bool { return p[i].Date.Before(p[j].Date) }
+func renderIndex(articles []*Page) ([]byte, error) {
+	// sort the articles by the lastest at the top
+	sort.Sort(sort.Reverse(Pages(articles)))
+	wr := &bytes.Buffer{}
+	if err := indexTmpl.Execute(wr, articles); err != nil {
+		return nil, fmt.Errorf("template parsing: %w", err)
+	}
+	return wr.Bytes(), nil
+}
+
+var pageTmpl = template.Must(template.ParseFiles("templates/page.html"))
 
 func parsePage(name string, page io.Reader) (*Page, error) {
 	name = strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
@@ -78,4 +109,15 @@ func parsePage(name string, page io.Reader) (*Page, error) {
 	return p, nil
 }
 
-var pageTmpl = template.Must(template.ParseFiles("templates/page.html"))
+type Page struct {
+	Path    string
+	Title   string
+	Date    time.Time
+	Content []byte
+}
+
+type Pages []*Page
+
+func (p Pages) Len() int           { return len(p) }
+func (p Pages) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func (p Pages) Less(i, j int) bool { return p[i].Date.Before(p[j].Date) }

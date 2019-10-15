@@ -1,18 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"html/template"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -31,7 +24,7 @@ var (
 			Name: "http_requests",
 			Help: "HTTP Requests",
 		},
-		[]string{"code", "method"},
+		[]string{"code", "method", "path"},
 	)
 )
 
@@ -47,7 +40,7 @@ func main() {
 		UseTLS:       true,
 	}
 	if c.MetricsToken == "" {
-		log.Fatal("can't run without metrics token")
+		//log.Fatal("can't run without metrics token")
 	}
 	if c.Host == "" {
 		c.Host = "localhost:8080"
@@ -82,7 +75,7 @@ func run(c config) error {
 	}
 	prometheus.DefaultRegisterer.MustRegister(requestDuration, totalRequests)
 
-	m := mux{
+	m := Mux{
 		host:        c.Host,
 		d:           articles,
 		alias:       aliases,
@@ -134,136 +127,4 @@ func redirect(host string) http.HandlerFunc {
 		log.Printf("redirect to: %s", target)
 		http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 	}
-}
-
-func parse(dir string) (map[string][]byte, error) {
-	files, err := ioutil.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read dir: %w", err)
-	}
-	articles := make(map[string][]byte)
-	var index []*Page
-	for _, f := range files {
-		name := f.Name()
-		f, err := os.Open(filepath.Join(dir, name))
-		if err != nil {
-			return nil, fmt.Errorf("open file: %w", err)
-		}
-		defer f.Close()
-		p, err := parsePage(f.Name(), f)
-		if err != nil {
-			return nil, fmt.Errorf("parse page %s: %w", f.Name(), err)
-		}
-		articles[p.Path] = p.Content
-		index = append(index, p)
-	}
-	articles["/"], err = renderIndex(index)
-	if err != nil {
-		return nil, fmt.Errorf("render index: %w", err)
-	}
-	return articles, nil
-}
-
-var indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
-
-func renderIndex(articles []*Page) ([]byte, error) {
-	// sort the articles by the lastest at the top
-	sort.Sort(sort.Reverse(Pages(articles)))
-	wr := &bytes.Buffer{}
-	if err := indexTmpl.Execute(wr, articles); err != nil {
-		return nil, fmt.Errorf("template parsing: %w", err)
-	}
-	return wr.Bytes(), nil
-}
-
-type mux struct {
-	static      http.Handler
-	metrics     http.Handler
-	bearerToken string
-	alias       map[string]string
-	d           map[string][]byte
-	host        string
-}
-
-type responseWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (r *responseWriter) WriteHeader(statusCode int) {
-	r.ResponseWriter.WriteHeader(statusCode)
-	r.statusCode = statusCode
-}
-
-func (r *responseWriter) StatusCode() int {
-	if r.statusCode == 0 {
-		return http.StatusOK
-	}
-	return r.statusCode
-}
-
-func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	path := r.URL.Path
-	wr := &responseWriter{ResponseWriter: w}
-	defer func() {
-		statusCode := strconv.Itoa(wr.StatusCode())
-		requestDuration.Observe(time.Since(start).Seconds())
-		totalRequests.WithLabelValues(statusCode, strings.ToUpper(r.Method)).Inc()
-	}()
-	if path == "/metrics" {
-		chunks := strings.Split(r.Header.Get("Authorization"), " ")
-		if len(chunks) == 2 && chunks[1] == m.bearerToken {
-			m.metrics.ServeHTTP(wr, r)
-			return
-		}
-		log.Printf("unknown token: %q", chunks[1])
-		wr.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	if r.Host != m.host {
-		log.Println("unknown host: ", r.Host)
-		wr.WriteHeader(http.StatusNotFound)
-		return
-	}
-	log.Println(r.Method, path)
-	alias, ok := m.alias[path]
-	if ok {
-		if len(r.URL.RawQuery) > 0 {
-			alias += "?" + r.URL.RawQuery
-		}
-		log.Printf("redirect to: %s", alias)
-		http.Redirect(wr, r, alias, http.StatusTemporaryRedirect)
-		return
-	}
-	a, ok := m.d[path]
-	if ok {
-		wr.Write(a)
-		return
-	}
-	m.static.ServeHTTP(wr, r)
-	return
-}
-
-// FileSystem custom file system handler
-type FileSystem struct {
-	fs http.FileSystem
-}
-
-// Open opens file
-func (fs FileSystem) Open(path string) (http.File, error) {
-	f, err := fs.fs.Open(path)
-	if err != nil {
-		return nil, err
-	}
-
-	s, err := f.Stat()
-	if s.IsDir() {
-		index := strings.TrimSuffix(path, "/") + "/index.html"
-		if _, err := fs.fs.Open(index); err != nil {
-			return nil, err
-		}
-	}
-
-	return f, nil
 }
