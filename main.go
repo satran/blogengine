@@ -60,24 +60,11 @@ func run(c config) error {
 		return fmt.Errorf("load aliases: %w", err)
 	}
 
-	requestDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "http_request_duration_seconds",
-		Help:    "Time spent in the service",
-		Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 25, 50, 100, 250},
-	})
-	totalRequests := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "http_requests",
-			Help: "HTTP Requests",
-		},
-		[]string{"code", "method", "path"},
-	)
-	prometheus.DefaultRegisterer.MustRegister(requestDuration, totalRequests)
-
 	m := http.ServeMux{}
-	m.HandleFunc("/", instrument(requestDuration, totalRequests, handleIndex(articles["/"], aliases)))
-	m.HandleFunc("/b/", instrument(requestDuration, totalRequests, handleArticle(articles)))
-	m.Handle("/s/", http.StripPrefix("/s/", http.FileServer(newFileSystem(c.StaticDir))))
+	analyze := analyzer()
+	m.Handle("/", analyze(handleIndex(articles["/"], aliases)))
+	m.Handle("/b/", analyze(handleArticle(articles)))
+	m.Handle("/s/", analyze(http.StripPrefix("/s/", http.FileServer(newFileSystem(c.StaticDir)))))
 	m.Handle("/metrics", requiresAuth(c.MetricsToken, promhttp.Handler()))
 
 	srv := &http.Server{
@@ -109,22 +96,38 @@ func requiresAuth(token string, handler http.Handler) http.Handler {
 	})
 }
 
-func instrument(duration prometheus.Histogram, total *prometheus.CounterVec, handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		path := r.URL.Path
-		wr := &ResponseWriter{ResponseWriter: w}
-		handler(wr, r)
-		since := time.Since(start)
-		statusCode := strconv.Itoa(wr.StatusCode())
-		duration.Observe(since.Seconds())
-		total.WithLabelValues(statusCode, strings.ToUpper(r.Method), path).Inc()
-		log.Println(since, r.Method, path)
+func analyzer() func(http.Handler) http.Handler {
+	reqDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "Time spent in the service",
+		Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+	})
+	totalReqs := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests",
+			Help: "HTTP Requests",
+		},
+		[]string{"code", "method", "path"},
+	)
+	prometheus.DefaultRegisterer.MustRegister(reqDuration, totalReqs)
+
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			path := r.URL.Path
+			wr := &ResponseWriter{ResponseWriter: w}
+			h.ServeHTTP(wr, r)
+			since := time.Since(start)
+			statusCode := strconv.Itoa(wr.StatusCode())
+			reqDuration.Observe(since.Seconds())
+			totalReqs.WithLabelValues(statusCode, strings.ToUpper(r.Method), path).Inc()
+			log.Println(since, r.Method, path)
+		})
 	}
 }
 
-func handleIndex(index []byte, aliases map[string]string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func handleIndex(index []byte, aliases map[string]string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			w.Write(index)
 			return
@@ -143,11 +146,11 @@ func handleIndex(index []byte, aliases map[string]string) http.HandlerFunc {
 		log.Printf("redirect to: %s", alias)
 		http.Redirect(w, r, alias, http.StatusTemporaryRedirect)
 		return
-	}
+	})
 }
 
-func handleArticle(articles map[string][]byte) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func handleArticle(articles map[string][]byte) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a, ok := articles[r.URL.Path]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -155,7 +158,7 @@ func handleArticle(articles map[string][]byte) http.HandlerFunc {
 			return
 		}
 		w.Write(a)
-	}
+	})
 }
 
 func getAliases(filename string) (map[string]string, error) {
