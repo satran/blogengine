@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -51,9 +54,9 @@ type config struct {
 }
 
 func run(c config) error {
-	articles, err := parse(c.PagesDir)
+	pages, err := parse(c.PagesDir)
 	if err != nil {
-		return fmt.Errorf("parse articles: %w", err)
+		return fmt.Errorf("parse pages: %w", err)
 	}
 	aliases, err := getAliases(c.AliasFile)
 	if err != nil {
@@ -62,8 +65,8 @@ func run(c config) error {
 
 	m := http.ServeMux{}
 	analyze := analyzer()
-	m.Handle("/", analyze(handleIndex(articles["/"], aliases)))
-	m.Handle("/b/", analyze(handleArticle(articles)))
+	m.Handle("/", analyze(handleIndex(pages, aliases)))
+	m.Handle("/b/", analyze(handlePages(pages)))
 	m.Handle("/s/", analyze(http.StripPrefix("/s/", http.FileServer(newFileSystem(c.StaticDir)))))
 	m.Handle("/metrics", requiresAuth(c.MetricsToken, promhttp.Handler()))
 
@@ -121,12 +124,20 @@ func analyzer() func(http.Handler) http.Handler {
 			statusCode := strconv.Itoa(wr.StatusCode())
 			reqDuration.Observe(since.Seconds())
 			totalReqs.WithLabelValues(statusCode, strings.ToUpper(r.Method), path).Inc()
-			log.Println(since, r.Method, path)
+			log.Println(since, wr.StatusCode(), r.Method, path)
 		})
 	}
 }
 
-func handleIndex(index []byte, aliases map[string]string) http.Handler {
+func handleIndex(pages []*Page, aliases map[string]string) http.Handler {
+	indexTmpl := template.Must(template.ParseFiles("templates/index.html"))
+	sort.Sort(sort.Reverse(Pages(pages)))
+	wr := &bytes.Buffer{}
+	if err := indexTmpl.Execute(wr, pages); err != nil {
+		panic(err)
+	}
+	index := wr.Bytes()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			w.Write(index)
@@ -149,9 +160,13 @@ func handleIndex(index []byte, aliases map[string]string) http.Handler {
 	})
 }
 
-func handleArticle(articles map[string][]byte) http.Handler {
+func handlePages(pages []*Page) http.Handler {
+	parsed := make(map[string][]byte)
+	for _, p := range pages {
+		parsed[p.Path] = p.Content
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		a, ok := articles[r.URL.Path]
+		a, ok := parsed[r.URL.Path]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(http.StatusText(http.StatusNotFound)))

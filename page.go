@@ -9,20 +9,18 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/russross/blackfriday"
 )
 
-func parse(dir string) (map[string][]byte, error) {
+func parse(dir string) ([]*Page, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read dir: %w", err)
 	}
-	articles := make(map[string][]byte)
-	var index []*Page
+	var pages []*Page
 	for _, f := range files {
 		name := f.Name()
 		f, err := os.Open(filepath.Join(dir, name))
@@ -34,26 +32,9 @@ func parse(dir string) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse page %s: %w", f.Name(), err)
 		}
-		articles[p.Path] = p.Content
-		index = append(index, p)
+		pages = append(pages, p)
 	}
-	articles["/"], err = renderIndex(index)
-	if err != nil {
-		return nil, fmt.Errorf("render index: %w", err)
-	}
-	return articles, nil
-}
-
-var indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
-
-func renderIndex(articles []*Page) ([]byte, error) {
-	// sort the articles by the lastest at the top
-	sort.Sort(sort.Reverse(Pages(articles)))
-	wr := &bytes.Buffer{}
-	if err := indexTmpl.Execute(wr, articles); err != nil {
-		return nil, fmt.Errorf("template parsing: %w", err)
-	}
-	return wr.Bytes(), nil
+	return pages, nil
 }
 
 var pageTmpl = template.Must(template.ParseFiles("templates/page.html"))
