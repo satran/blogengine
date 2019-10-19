@@ -87,14 +87,16 @@ func parsePage(name string, page io.Reader) (*Page, error) {
 		return nil, fmt.Errorf("template parsing: %w", err)
 	}
 	p.Content = wr.Bytes()
+	p.Markdown = string(markdown)
 	return p, nil
 }
 
 type Page struct {
-	Path    string
-	Title   string
-	Date    time.Time
-	Content []byte
+	Path     string
+	Title    string
+	Date     time.Time
+	Content  []byte
+	Markdown string
 }
 
 type Pages []*Page

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/feeds"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -58,6 +59,9 @@ func run(c config) error {
 	if err != nil {
 		return fmt.Errorf("parse pages: %w", err)
 	}
+	// for most purposes sorting it reverse stands best
+	sort.Sort(sort.Reverse(Pages(pages)))
+
 	aliases, err := getAliases(c.AliasFile)
 	if err != nil {
 		return fmt.Errorf("load aliases: %w", err)
@@ -66,6 +70,7 @@ func run(c config) error {
 	m := http.ServeMux{}
 	analyze := analyzer()
 	m.Handle("/", analyze(handleIndex(pages, aliases)))
+	m.Handle("/feed.xml", analyze(handleFeed(c.Host, c.UseTLS, pages)))
 	m.Handle("/b/", analyze(handlePages(pages)))
 	m.Handle("/s/", analyze(http.StripPrefix("/s/", http.FileServer(newFileSystem(c.StaticDir)))))
 	m.Handle("/metrics", requiresAuth(c.MetricsToken, promhttp.Handler()))
@@ -131,7 +136,6 @@ func analyzer() func(http.Handler) http.Handler {
 
 func handleIndex(pages []*Page, aliases map[string]string) http.Handler {
 	indexTmpl := template.Must(template.ParseFiles("templates/index.html"))
-	sort.Sort(sort.Reverse(Pages(pages)))
 	wr := &bytes.Buffer{}
 	if err := indexTmpl.Execute(wr, pages); err != nil {
 		panic(err)
@@ -157,6 +161,38 @@ func handleIndex(pages []*Page, aliases map[string]string) http.Handler {
 		log.Printf("redirect to: %s", alias)
 		http.Redirect(w, r, alias, http.StatusTemporaryRedirect)
 		return
+	})
+}
+
+func handleFeed(hostname string, tls bool, pages []*Page) http.Handler {
+	feed := &feeds.Feed{
+		Title:       "satran's blog",
+		Link:        &feeds.Link{Href: "https://satran.in"},
+		Description: "Some of my random thoughts, mostly about technology",
+		Author:      &feeds.Author{Name: "Satyajit Ranjeev", Email: "s@ranjeev.in"},
+	}
+	host := "https://" + hostname
+	if !tls {
+		host = "http://" + hostname
+	}
+	for i := len(pages) - 1; i >= 0; i-- {
+		feed.Items = append(feed.Items, &feeds.Item{
+			Title:       pages[i].Title,
+			Link:        &feeds.Link{Href: fmt.Sprintf("%s%s", host, pages[i].Path)},
+			Description: pages[i].Markdown,
+			Created:     pages[i].Date,
+		})
+	}
+
+	rss, err := feed.ToRss()
+	if err != nil {
+		panic(err)
+	}
+
+	content := []byte(rss)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+		w.Write(content)
 	})
 }
 
