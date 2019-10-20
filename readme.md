@@ -7,7 +7,7 @@ If you plan to use it there are a few environment variables you need to provide:
 - `HOSTNAME`: to ensure the right hostname is set for serving RSS feeds
 - `CERT` & `KEY`: if you intend on using TLS, the files for the certificate
 - `SITE`: the directory from which to serve the site from
-- `METRICS`: a random string to be used as token if you want to serve it under `/metrics` for prometheus
+- `METRICS_TOKEN`: a random string to be used as token if you want to serve it under `/metrics` for prometheus
 
 
 The site directory needs to follow the structure below:
