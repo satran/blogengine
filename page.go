@@ -15,7 +15,8 @@ import (
 	"github.com/russross/blackfriday"
 )
 
-func parse(dir string) ([]*Page, error) {
+func parse(templatesDir, dir string) ([]*Page, error) {
+	tmpl := template.Must(template.ParseFiles(filepath.Join(templatesDir, "page.html")))
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read dir: %w", err)
@@ -28,7 +29,7 @@ func parse(dir string) ([]*Page, error) {
 			return nil, fmt.Errorf("open file: %w", err)
 		}
 		defer f.Close()
-		p, err := parsePage(f.Name(), f)
+		p, err := parsePage(tmpl, f.Name(), f)
 		if err != nil {
 			return nil, fmt.Errorf("parse page %s: %w", f.Name(), err)
 		}
@@ -37,12 +38,10 @@ func parse(dir string) ([]*Page, error) {
 	return pages, nil
 }
 
-var pageTmpl = template.Must(template.ParseFiles("templates/page.html"))
-
-func parsePage(name string, page io.Reader) (*Page, error) {
+func parsePage(tmpl *template.Template, name string, page io.Reader) (*Page, error) {
 	name = strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
 	p := &Page{
-		Path: "/b/" + name,
+		URL: "/b/" + name,
 	}
 	r := bufio.NewReader(page)
 	n := 0
@@ -83,7 +82,7 @@ func parsePage(name string, page io.Reader) (*Page, error) {
 		"Body":  markdown,
 		"Date":  p.Date,
 	}
-	if err := pageTmpl.Execute(wr, data); err != nil {
+	if err := tmpl.Execute(wr, data); err != nil {
 		return nil, fmt.Errorf("template parsing: %w", err)
 	}
 	p.Content = wr.Bytes()
@@ -92,7 +91,7 @@ func parsePage(name string, page io.Reader) (*Page, error) {
 }
 
 type Page struct {
-	Path     string
+	URL      string
 	Title    string
 	Date     time.Time
 	Content  []byte

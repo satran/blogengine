@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,14 +24,15 @@ func main() {
 		Host:         os.Getenv("HOSTNAME"),
 		Cert:         os.Getenv("CERT"),
 		Key:          os.Getenv("KEY"),
-		PagesDir:     os.Getenv("PAGES"),
-		StaticDir:    os.Getenv("STATIC"),
-		AliasFile:    os.Getenv("ALIAS"),
+		Site:         os.Getenv("SITE"),
 		MetricsToken: os.Getenv("METRICS_TOKEN"),
 		UseTLS:       true,
 	}
+	if c.Site == "" {
+		log.Fatal("Specify site directory")
+	}
 	if c.MetricsToken == "" {
-		//log.Fatal("can't run without metrics token")
+		log.Println("warning: running without metrics token")
 	}
 	if c.Host == "" {
 		c.Host = "localhost:8080"
@@ -38,6 +40,10 @@ func main() {
 	if c.Cert == "" && c.Key == "" {
 		c.UseTLS = false
 	}
+	c.PagesDir = filepath.Join(c.Site, "blog")
+	c.StaticDir = filepath.Join(c.Site, "static")
+	c.AliasFile = filepath.Join(c.Site, "alias.json")
+	c.TemplatesDir = filepath.Join(c.Site, "templates")
 	if err := run(c); err != nil {
 		log.Fatal(err)
 	}
@@ -47,15 +53,17 @@ type config struct {
 	Host         string
 	Cert         string
 	Key          string
+	Site         string
 	PagesDir     string
 	StaticDir    string
+	TemplatesDir string
 	AliasFile    string
 	MetricsToken string
 	UseTLS       bool
 }
 
 func run(c config) error {
-	pages, err := parse(c.PagesDir)
+	pages, err := parse(c.TemplatesDir, c.PagesDir)
 	if err != nil {
 		return fmt.Errorf("parse pages: %w", err)
 	}
@@ -69,7 +77,7 @@ func run(c config) error {
 
 	m := http.ServeMux{}
 	analyze := analyzer()
-	m.Handle("/", analyze(handleIndex(pages, aliases)))
+	m.Handle("/", analyze(handleIndex(c.TemplatesDir, pages, aliases)))
 	m.Handle("/feed.xml", analyze(handleFeed(c.Host, c.UseTLS, pages)))
 	m.Handle("/b/", analyze(handlePages(pages)))
 	m.Handle("/s/", analyze(http.StripPrefix("/s/", http.FileServer(newFileSystem(c.StaticDir)))))
@@ -134,10 +142,10 @@ func analyzer() func(http.Handler) http.Handler {
 	}
 }
 
-func handleIndex(pages []*Page, aliases map[string]string) http.Handler {
-	indexTmpl := template.Must(template.ParseFiles("templates/index.html"))
+func handleIndex(templatesDir string, pages []*Page, aliases map[string]string) http.Handler {
+	indexTmpl := template.Must(template.ParseFiles(filepath.Join(templatesDir, "index.html")))
 	wr := &bytes.Buffer{}
-	if err := indexTmpl.Execute(wr, pages); err != nil {
+	if err := indexTmpl.Execute(wr, map[string]interface{}{"Pages": pages}); err != nil {
 		panic(err)
 	}
 	index := wr.Bytes()
@@ -178,7 +186,7 @@ func handleFeed(hostname string, tls bool, pages []*Page) http.Handler {
 	for i := len(pages) - 1; i >= 0; i-- {
 		feed.Items = append(feed.Items, &feeds.Item{
 			Title:       pages[i].Title,
-			Link:        &feeds.Link{Href: fmt.Sprintf("%s%s", host, pages[i].Path)},
+			Link:        &feeds.Link{Href: fmt.Sprintf("%s%s", host, pages[i].URL)},
 			Description: pages[i].Markdown,
 			Created:     pages[i].Date,
 		})
@@ -199,7 +207,7 @@ func handleFeed(hostname string, tls bool, pages []*Page) http.Handler {
 func handlePages(pages []*Page) http.Handler {
 	parsed := make(map[string][]byte)
 	for _, p := range pages {
-		parsed[p.Path] = p.Content
+		parsed[p.URL] = p.Content
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a, ok := parsed[r.URL.Path]
