@@ -137,7 +137,7 @@ func analyzer() func(http.Handler) http.Handler {
 			statusCode := strconv.Itoa(wr.StatusCode())
 			reqDuration.Observe(since.Seconds())
 			totalReqs.WithLabelValues(statusCode, strings.ToUpper(r.Method), path).Inc()
-			log.Println(since, wr.StatusCode(), r.Method, path)
+			log.Println(since, wr.StatusCode(), r.Method, r.URL)
 		})
 	}
 }
