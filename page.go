@@ -73,7 +73,7 @@ func parsePage(tmpl *template.Template, name string, page io.Reader) (*Page, err
 			return nil, fmt.Errorf("read content: %w", err)
 		}
 		// the template.HTML allows embedding HTML in the usually escaped HTML during template execution
-		markdown = template.HTML(string(blackfriday.Run(content)))
+		markdown = template.HTML(string(blackfriday.Run(content, blackfriday.WithExtensions(blackfriday.Footnotes | blackfriday.CommonExtensions))))
 		break
 	}
 	wr := &bytes.Buffer{}
